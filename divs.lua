@@ -1,5 +1,5 @@
 -- divs
--- a Moog Subharmonicon
+-- a Moog Subharmonicon clone
 -- midouest@0.0.1
 
 MusicUtil = require("musicutil")
