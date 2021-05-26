@@ -1,4 +1,8 @@
 local MusicUtil = require('musicutil')
+local TabUtil = require('tabutil')
+
+tempo_scale = 4
+trigger_mode = 'or'
 
 -- Static voltage offset added to notes before sending to synthesizer
 local pitch_offset_v = -5
@@ -63,14 +67,16 @@ Subharmonicon.__index = Subharmonicon
 -- Create a new Subharmonicon instance
 -- @param options Object with the following properties:
 --                - play_voice(index, pitch_v, level_v)
+--                - trigger_env_gen()
 function Subharmonicon.new(options)
     local sh = {}
 
-    sh._play_voice = options.play_voice
+    sh._play_voice = options.play_voice or function() end
+    sh._trigger_env_gen = options.trigger_env_gen or function() end
 
     -- Maximum sequencer step range. This is used to scale the offset that the
     -- sequencer applies to sub voices.
-    sh._step_range = 12
+    sh._step_range = 24
 
     -- Voice state
     sh._voices = {
@@ -96,7 +102,7 @@ function Subharmonicon.new(options)
         make_rhythm_generator(false, false),
     }
 
-    sh._clocks = {}
+    sh._clock_ids = {}
 
     return setmetatable(sh, Subharmonicon)
 end
@@ -119,31 +125,61 @@ end
 
 function Subharmonicon:start()
     self:stop()
-    for i = 1, #self._rhythm_generators do
-        local id = self:_run_rhythm_generator(i)
-        table.insert(self._clocks, id)
-    end
+    local id = self:_run_rhythm_generators()
+    self._clock_ids = {id}
 end
 
 function Subharmonicon:stop()
-    for _, id in ipairs(self._clocks) do
+    for _, id in ipairs(self._clock_ids) do
         clock.cancel(id)
     end
-    self._clocks = {}
+    self._clock_ids = {}
 end
 
-function Subharmonicon:_run_rhythm_generator(index)
-    return clock.run(function(sh, index)
+local function get_divisors(sh)
+    local divisors = {}
+    for i, gen in ipairs(sh._rhythm_generators) do
+        table.insert(divisors, gen.subdivision)
+    end
+    return divisors
+end
+
+function Subharmonicon:_run_rhythm_generators(sh)
+    return clock.run(function(sh)
+        local beat = 0
         while true do
-            local rhythm_generator = sh._rhythm_generators[index]
-            for target_index = 1, #rhythm_generator.targets do
-                if rhythm_generator.targets[target_index] then
-                    sh:_trigger_sequencer(target_index)
+            local to_fire = {false, false}
+
+            for i, rhythm_generator in ipairs(sh._rhythm_generators) do
+                local should_fire = beat % rhythm_generator.subdivision == 0
+                if should_fire then
+                    for j, is_target in ipairs(rhythm_generator.targets) do
+                        if trigger_mode == 'xor' then
+                            local will_fire = to_fire[j]
+                            to_fire[j] = (will_fire and not is_target) or (not will_fire and is_target)
+                        else
+                            to_fire[j] = to_fire[j] or is_target
+                        end
+                    end
                 end
             end
-            clock.sync(1 / rhythm_generator.subdivision)
+
+            local any_fired = false
+            for i, should_fire in ipairs(to_fire) do
+                if should_fire then
+                    any_fired = true
+                    sh:_trigger_sequencer(i)
+                end
+            end
+
+            if any_fired then
+                sh._trigger_env_gen()
+            end
+
+            beat = beat + 1
+            clock.sync(1 / tempo_scale)
         end
-    end, self, index)
+    end, self)
 end
 
 -- Trigger the sequencer at the given index

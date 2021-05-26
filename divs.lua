@@ -45,12 +45,13 @@ function init()
     -- True if the tempo UI should be shown
     show_tempo = false
 
-    sh =
-        Subharmonicon.new {
-        play_voice = crow.ii.jf.play_voice
+    crow.output[1].action = "pulse(0.005, 10)"
+    sh = Subharmonicon.new {
+        play_voice = crow.ii.jf.play_voice,
+        trigger_env_gen = crow.output[1]
     }
 
-    sh:start()
+    -- sh:start()
 
     -- Screen refresh loop
     clock.run(
@@ -67,6 +68,14 @@ function cleanup()
     sh:stop()
     crow.ii.jf.play_voice(0, 0, 0)
     crow.ii.jf.mode(0)
+end
+
+clock.transport.start = function()
+    sh:start()
+end
+
+clock.transport.stop = function()
+    sh:stop()
 end
 
 function keyboard.char(c)
@@ -152,7 +161,7 @@ function enc(n, d)
     if n == 1 then
         if show_tempo then
             local tempo = clock.get_tempo()
-            params:set("clock_tempo", tempo + d / 10)
+            params:set("clock_tempo", tempo + d)
         else
             selected_page = util.clamp(selected_page + d, 1, #page_titles)
         end
@@ -232,7 +241,7 @@ function redraw()
 
     if show_tempo then
         Page.redraw({"tempo", "", "", ""}, 1)
-        local tempo = string.format("%.1f", clock.get_tempo())
+        local tempo = string.format("%.0f", clock.get_tempo())
         local tempo_width = screen.text_extents(tempo)
         screen.move(32 + (32 - tempo_width) // 2, 6)
         screen.level(15)
